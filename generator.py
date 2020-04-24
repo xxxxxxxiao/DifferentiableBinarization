@@ -69,8 +69,8 @@ def draw_thresh_map(polygon, canvas, mask, shrink_ratio=0.4):
     polygon[:, 0] = polygon[:, 0] - xmin
     polygon[:, 1] = polygon[:, 1] - ymin
 
-    xs = np.broadcast_to(np.linspace(0, width - 1, num=width).reshape(1, width), (height, width))
-    ys = np.broadcast_to(np.linspace(0, height - 1, num=height).reshape(height, 1), (height, width))
+    xs = np.broadcast_to(np.linspace(0, width - 1, num=width).reshape(1, width), (height, width)).astype(np.int32)
+    ys = np.broadcast_to(np.linspace(0, height - 1, num=height).reshape(height, 1), (height, width)).astype(np.int32)
 
     distance_map = np.zeros((polygon.shape[0], height, width), dtype=np.float32)
     for i in range(polygon.shape[0]):
@@ -85,8 +85,8 @@ def draw_thresh_map(polygon, canvas, mask, shrink_ratio=0.4):
     ymax_valid = min(max(0, ymax), canvas.shape[0] - 1)
     canvas[ymin_valid:ymax_valid + 1, xmin_valid:xmax_valid + 1] = np.fmax(
         1 - distance_map[
-            ymin_valid - ymin:ymax_valid - ymin,
-            xmin_valid - xmin:xmax_valid - xmin],
+            ymin_valid - ymin:ymax_valid - ymin + 1,
+            xmin_valid - xmin:xmax_valid - xmin + 1],
         canvas[ymin_valid:ymax_valid + 1, xmin_valid:xmax_valid + 1])
 
 
@@ -108,10 +108,10 @@ def compute_distance(xs, ys, point_1, point_2):
 def generate(data_dir, batch_size=16, image_size=640, min_text_size=8, shrink_ratio=0.4, thresh_min=0.3,
              thresh_max=0.7, is_training=True):
     split = 'train' if is_training else 'test'
-    with open(osp.join(data_dir, f'{split}_list.txt')) as f:
+    with open(osp.join(data_dir, split+'_list.txt')) as f:
         image_fnames = f.readlines()
-        image_paths = [osp.join(data_dir, f'{split}_images', image_fname.strip()) for image_fname in image_fnames]
-        gt_paths = [osp.join(data_dir, f'{split}_gts', image_fname.strip() + '.txt') for image_fname in image_fnames]
+        image_paths = [osp.join(data_dir, split+'_images', image_fname.strip()) for image_fname in image_fnames]
+        gt_paths = [osp.join(data_dir, split+'_gts', image_fname.strip().split('.')[0] + '.txt') for image_fname in image_fnames]
         all_anns = load_all_anns(gt_paths)
     transform_aug = iaa.Sequential([iaa.Fliplr(0.5), iaa.Affine(rotate=(-10, 10)), iaa.Resize((0.5, 3.0))])
     dataset_size = len(image_paths)

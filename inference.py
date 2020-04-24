@@ -8,6 +8,8 @@ import pyclipper
 
 from model import dbnet
 
+import tensorflow as tf
+
 
 def resize_image(image, image_short_side=736):
     height, width, _ = image.shape
@@ -104,13 +106,56 @@ def polygons_from_bitmap(pred, bitmap, dest_width, dest_height, max_candidates=1
         scores.append(score)
     return boxes, scores
 
+def boxes_from_bitmap(pred, bitmap, dest_width, dest_height, max_candidates=100, box_thresh=0.7):
+    pred = pred[..., 0]
+    bitmap = bitmap[..., 0]
+    height, width = bitmap.shape
+
+    contours, _ = cv2.findContours(
+        (bitmap*255).astype(np.uint8),
+        cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    num_contours = min(len(contours), max_candidates)
+    boxes = np.zeros((num_contours, 4, 2), dtype=np.int16)
+    scores = np.zeros((num_contours,), dtype=np.float32)
+
+    for index in range(num_contours):
+        contour = contours[index]
+        points, sside = get_mini_boxes(contour)
+        if sside < 3:
+            continue
+        points = np.array(points)
+        score = box_score_fast(pred, points.reshape(-1, 2))
+        if box_thresh > score:
+            continue
+    
+        box = unclip(points).reshape(-1, 1, 2)
+        box, sside = get_mini_boxes(box)
+        if sside < 3 + 2:
+            continue
+        box = np.array(box)
+        if not isinstance(dest_width, int):
+            dest_width = dest_width.item()
+            dest_height = dest_height.item()
+        
+        box[:, 0] = np.clip(
+            np.round(box[:, 0] / width * dest_width), 0, dest_width)
+        box[:, 1] = np.clip(
+            np.round(box[:, 1] / height * dest_height), 0, dest_height)
+        boxes[index, :, :] = box.astype(np.int16)
+        scores[index] = score
+    return boxes, scores
 
 if __name__ == '__main__':
+
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    session = tf.Session(config=config)
+
     mean = np.array([103.939, 116.779, 123.68])
 
     _, model = dbnet()
-    model.load_weights('/home/adam/workspace/github/xuannianz/carrot/db/checkpoints/2020-01-02/db_48_2.0216_2.5701.h5', by_name=True, skip_mismatch=True)
-    for image_path in glob.glob(osp.join('datasets/total_text/test_images', '*.jpg')):
+    model.load_weights('/new_home/xxiao/DifferentiableBinarization_TF/checkpoints/db_21_1.6634_1.9416.h5', by_name=True, skip_mismatch=True)
+    for image_path in glob.glob(osp.join('/new_home/xxiao/DB_with_normal_DCN/datasets/report/test_images', '*')):
         image = cv2.imread(image_path)
         src_image = image.copy()
         h, w = image.shape[:2]
@@ -120,11 +165,23 @@ if __name__ == '__main__':
         image_input = np.expand_dims(image, axis=0)
         p = model.predict(image_input)[0]
         bitmap = p > 0.3
-        boxes, scores = polygons_from_bitmap(p, bitmap, w, h, box_thresh=0.5)
+        # boxes, scores = polygons_from_bitmap(p, bitmap, w, h, box_thresh=0.5)
+        boxes, scores = boxes_from_bitmap(p, bitmap, w, h, box_thresh=0.1)
+        
+        result_file_path = 'test_results/'+image_path.split('/')[-1].split('.')[0]+'.txt'
+        with open(result_file_path, 'wt') as f:
+            for i, box in enumerate(boxes):
+                box = np.array(box).reshape(-1).tolist()
+                result = ",".join([str(int(x)) for x in box])
+                score = scores[i]
+                f.write(result + ',' + str(score) + "\n")
+        
+
+
         for box in boxes:
-            cv2.drawContours(src_image, [np.array(box)], -1, (0, 255, 0), 2)
-        cv2.namedWindow('image', cv2.WINDOW_NORMAL)
-        cv2.imshow('image', src_image)
-        cv2.waitKey(0)
+            cv2.drawContours(src_image, [np.array(box).astype(int)], -1, (0, 255, 0), 2)
+        #cv2.namedWindow('image', cv2.WINDOW_NORMAL)
+        #v2.imshow('image', src_image)
+        #cv2.waitKey(0)
         image_fname = osp.split(image_path)[-1]
-        cv2.imwrite('test/' + image_fname, src_image)
+        cv2.imwrite('test_results/' + image_fname, src_image)
